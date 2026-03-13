@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SwitchBot 温湿度モニター</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
+
+  :root {
+    --bg: #080c10;
+    --surface: #0e1318;
+    --border: #1e2830;
+    --accent1: #00e5aa;
+    --accent2: #4d9eff;
+    --accent3: #ff6b5b;
+    --text: #e8edf2;
+    --muted: #4a5568;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Background grid */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,229,170,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,229,170,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 40px 24px;
+  }
+
+  header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin-bottom: 48px;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+
+  .header-left h1 {
+    font-size: 2rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    background: linear-gradient(135deg, var(--accent1), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .header-left p {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  .last-updated {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--muted);
+    text-align: right;
+  }
+
+  /* Stats cards */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+  }
+
+  .stat-card:nth-child(1)::before { background: var(--accent1); }
+  .stat-card:nth-child(2)::before { background: var(--accent1); }
+  .stat-card:nth-child(3)::before { background: var(--accent2); }
+  .stat-card:nth-child(4)::before { background: var(--accent2); }
+  .stat-card:nth-child(5)::before { background: var(--accent3); }
+  .stat-card:nth-child(6)::before { background: var(--accent3); }
+
+  .stat-card:hover { border-color: var(--accent1); }
+
+  .stat-device {
+    font-size: 0.7rem;
+    color: var(--muted);
+    font-family: 'JetBrains Mono', monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 8px;
+  }
+
+  .stat-value {
+    font-size: 2rem;
+    font-weight: 800;
+    font-family: 'JetBrains Mono', monospace;
+    line-height: 1;
+  }
+
+  .stat-card:nth-child(1) .stat-value,
+  .stat-card:nth-child(2) .stat-value { color: var(--accent1); }
+  .stat-card:nth-child(3) .stat-value,
+  .stat-card:nth-child(4) .stat-value { color: var(--accent2); }
+  .stat-card:nth-child(5) .stat-value,
+  .stat-card:nth-child(6) .stat-value { color: var(--accent3); }
+
+  .stat-label {
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  /* Filter bar */
+  .filter-bar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .filter-label {
+    font-size: 0.75rem;
+    color: var(--muted);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .filter-btn {
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .filter-btn:hover { border-color: var(--accent1); color: var(--accent1); }
+  .filter-btn.active { background: var(--accent1); border-color: var(--accent1); color: #000; font-weight: 600; }
+
+  /* Charts */
+  .chart-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px;
+    margin-bottom: 24px;
+  }
+
+  .chart-title {
+    font-size: 0.8rem;
+    color: var(--muted);
+    font-family: 'JetBrains Mono', monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 20px;
+  }
+
+  .chart-wrapper {
+    position: relative;
+    height: 260px;
+  }
+
+  /* Loading */
+  .loading {
+    text-align: center;
+    padding: 80px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+
+  .loading::after {
+    content: '';
+    display: block;
+    width: 32px;
+    height: 32px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent1);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 16px auto 0;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .error {
+    text-align: center;
+    padding: 40px;
+    color: var(--accent3);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div class="header-left">
+      <h1>温湿度モニター</h1>
+      <p>SwitchBot Dashboard / switchbot-logger</p>
+    </div>
+    <div class="last-updated" id="lastUpdated">読み込み中...</div>
+  </header>
+
+  <div id="statsGrid" class="stats-grid"></div>
+
+  <div class="filter-bar">
+    <span class="filter-label">表示期間:</span>
+    <button class="filter-btn active" onclick="setRange(24)" id="btn24">24時間</button>
+    <button class="filter-btn" onclick="setRange(72)" id="btn72">3日</button>
+    <button class="filter-btn" onclick="setRange(168)" id="btn168">1週間</button>
+    <button class="filter-btn" onclick="setRange(0)" id="btnAll">全期間</button>
+  </div>
+
+  <div id="mainContent">
+    <div class="loading">データを読み込んでいます</div>
+  </div>
+</div>
+
+<script>
+const CSV_URL = './switchbot_log.csv';
+const COLORS = ['#00e5aa', '#4d9eff', '#ff6b5b'];
+
+let allData = {};
+let currentRange = 24;
+let tempChart = null;
+let humChart = null;
+
+async function loadCSV() {
+  const res = await fetch(CSV_URL + '?t=' + Date.now());
+  const text = await res.text();
+  const lines = text.trim().split('\n');
+  const headers = lines[0].split(',');
+
+  const rows = lines.slice(1).map(line => {
+    const cols = line.split(',');
+    return {
+      datetime: new Date(cols[0]),
+      device: cols[1],
+      temperature: parseFloat(cols[2]),
+      humidity: parseFloat(cols[3]),
+    };
+  }).filter(r => !isNaN(r.temperature));
+
+  // デバイスごとに分類
+  const data = {};
+  rows.forEach(r => {
+    if (!data[r.device]) data[r.device] = [];
+    data[r.device].push(r);
+  });
+
+  return data;
+}
+
+function filterByRange(data, hours) {
+  if (hours === 0) return data;
+  const cutoff = new Date(Date.now() - hours * 3600 * 1000);
+  const filtered = {};
+  Object.entries(data).forEach(([name, rows]) => {
+    filtered[name] = rows.filter(r => r.datetime >= cutoff);
+  });
+  return filtered;
+}
+
+function renderStats(data) {
+  const grid = document.getElementById('statsGrid');
+  grid.innerHTML = '';
+  const devices = Object.keys(data);
+
+  devices.forEach((name, i) => {
+    const rows = data[name];
+    if (!rows.length) return;
+    const temps = rows.map(r => r.temperature);
+    const hums = rows.map(r => r.humidity);
+    const latest = rows[rows.length - 1];
+    const color = COLORS[i % COLORS.length];
+
+    const shortName = name.replace('防水温湿度計 ', '');
+
+    // 温度カード
+    const tc = document.createElement('div');
+    tc.className = 'stat-card';
+    tc.innerHTML = `
+      <div class="stat-device">${shortName}</div>
+      <div class="stat-value" style="color:${color}">${latest.temperature}°C</div>
+      <div class="stat-label">最新温度 / 最小 ${Math.min(...temps)}° 最大 ${Math.max(...temps)}°</div>
+    `;
+    grid.appendChild(tc);
+
+    // 湿度カード
+    const hc = document.createElement('div');
+    hc.className = 'stat-card';
+    hc.innerHTML = `
+      <div class="stat-device">${shortName} 湿度</div>
+      <div class="stat-value" style="color:${color}">${latest.humidity}%</div>
+      <div class="stat-label">最新湿度 / 最小 ${Math.min(...hums)}% 最大 ${Math.max(...hums)}%</div>
+    `;
+    grid.appendChild(hc);
+  });
+}
+
+function renderCharts(data) {
+  const devices = Object.keys(data);
+  if (!devices.length) return;
+
+  const labels = data[devices[0]].map(r =>
+    r.datetime.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  );
+
+  const tempDatasets = devices.map((name, i) => ({
+    label: name.replace('防水温湿度計 ', ''),
+    data: data[name].map(r => r.temperature),
+    borderColor: COLORS[i % COLORS.length],
+    backgroundColor: COLORS[i % COLORS.length] + '18',
+    borderWidth: 2,
+    pointRadius: 2,
+    tension: 0.3,
+    fill: true,
+  }));
+
+  const humDatasets = devices.map((name, i) => ({
+    label: name.replace('防水温湿度計 ', ''),
+    data: data[name].map(r => r.humidity),
+    borderColor: COLORS[i % COLORS.length],
+    backgroundColor: COLORS[i % COLORS.length] + '18',
+    borderWidth: 2,
+    pointRadius: 2,
+    tension: 0.3,
+    fill: true,
+  }));
+
+  const chartOpts = (unit) => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        labels: { color: '#4a5568', font: { family: 'JetBrains Mono', size: 11 } }
+      }
+    },
+    scales: {
+      x: {
+        ticks: { color: '#4a5568', font: { family: 'JetBrains Mono', size: 10 }, maxTicksLimit: 8 },
+        grid: { color: '#1e2830' }
+      },
+      y: {
+        ticks: { color: '#4a5568', font: { family: 'JetBrains Mono', size: 10 },
+          callback: v => v + unit },
+        grid: { color: '#1e2830' }
+      }
+    }
+  });
+
+  document.getElementById('mainContent').innerHTML = `
+    <div class="chart-card">
+      <div class="chart-title">温度 (°C)</div>
+      <div class="chart-wrapper"><canvas id="tempChart"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">湿度 (%)</div>
+      <div class="chart-wrapper"><canvas id="humChart"></canvas></div>
+    </div>
+  `;
+
+  if (tempChart) tempChart.destroy();
+  if (humChart) humChart.destroy();
+
+  tempChart = new Chart(document.getElementById('tempChart'), {
+    type: 'line', data: { labels, datasets: tempDatasets }, options: chartOpts('°C')
+  });
+
+  humChart = new Chart(document.getElementById('humChart'), {
+    type: 'line', data: { labels, datasets: humDatasets }, options: chartOpts('%')
+  });
+}
+
+async function setRange(hours) {
+  currentRange = hours;
+  ['24', '72', '168', 'All'].forEach(id => {
+    document.getElementById('btn' + id)?.classList.remove('active');
+  });
+  const idMap = { 24: 'btn24', 72: 'btn72', 168: 'btn168', 0: 'btnAll' };
+  document.getElementById(idMap[hours])?.classList.add('active');
+
+  const filtered = filterByRange(allData, hours);
+  renderStats(filtered);
+  renderCharts(filtered);
+}
+
+async function init() {
+  try {
+    allData = await loadCSV();
+    const devices = Object.keys(allData);
+    if (!devices.length) throw new Error('データがありません');
+
+    const latest = allData[devices[0]].slice(-1)[0];
+    document.getElementById('lastUpdated').textContent =
+      '最終更新: ' + latest.datetime.toLocaleString('ja-JP');
+
+    await setRange(currentRange);
+
+    // 5分ごとに自動更新
+    setInterval(async () => {
+      allData = await loadCSV();
+      await setRange(currentRange);
+    }, 5 * 60 * 1000);
+
+  } catch(e) {
+    document.getElementById('mainContent').innerHTML =
+      `<div class="error">データの読み込みに失敗しました<br>${e.message}</div>`;
+  }
+}
+
+init();
+</script>
+</body>
+</html>
